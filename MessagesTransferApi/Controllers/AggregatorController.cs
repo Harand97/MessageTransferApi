@@ -7,6 +7,7 @@ using MessagesTransferApi.Data.Contexts;
 using MessagesTransferApi.Logic;
 using MessagesTransferApi.Models;
 using MessagesTransferApi.Data.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace MessagesTransferApi.Controllers
 {
@@ -16,23 +17,45 @@ namespace MessagesTransferApi.Controllers
         private DataContext _context;
 
         private ITokenGeneratorService _tokenGenerator;
-
         private IConnectorSenderService _connectorSender;
 
-        public AggregatorController(DataContext context, ITokenGeneratorService tokenGenerator, IConnectorSenderService connetorSender)
+        public AggregatorController(DataContext context, ITokenGeneratorService tokenGenerator, 
+                                        IConnectorSenderService connetorSender)
         {
             this._context = context;
             this._tokenGenerator = tokenGenerator;
             this._connectorSender = connetorSender;
         }
 
+        [HttpGet]
+        [Route("Users")]
+        public IActionResult GetUsers()
+        {
+            return Json(_context.Users);
+        }
+
+        [HttpGet]
+        [Route("Accounts")]
+        public IActionResult GetAccounts()
+        {
+            return Json(_context.Accounts);
+        }
+
         [HttpPost]
         [Route("Users")]
-        public ActionResult AddUser([FromBody] UserData userData)
+        public async Task<IActionResult> AddUser([FromBody] UserData userData)
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest();
+                return BadRequest(ModelState);
+            }
+
+            User existedUser = await _context
+                .Users
+                .FirstOrDefaultAsync(u => u.Login == userData.Login);
+            if (existedUser != null)
+            {
+                return BadRequest("Already have such login");
             }
 
             string userToken = _tokenGenerator.GenerateToken(userData.Login);
@@ -46,7 +69,7 @@ namespace MessagesTransferApi.Controllers
 
             _context.Users.Add(user);
 
-            _context.SaveChanges();
+            await _context.SaveChangesAsync();
 
             return Json(new
             {
@@ -56,42 +79,51 @@ namespace MessagesTransferApi.Controllers
 
         [HttpPost]
         [Route("Webhook")]
-        public ActionResult AttachWebhook([FromBody] UserData userData, [FromBody] string userToken)
+        public async Task<IActionResult> AttachWebhook([FromBody] string url, [FromQuery] string userToken)
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest();
+                return BadRequest(ModelState);
             }
 
-            User user = _context.Users.FirstOrDefault(u => u.UserToken == userToken);
+            User user = await _context
+                .Users
+                .FirstOrDefaultAsync(u => u.UserToken == userToken);
             if (user == null)
             {
                 return NotFound("Invalid token");
             }
 
-            user.FeedbackUrl = userData.Url;
+            user.FeedbackUrl = url;
 
-            _context.SaveChanges();
+            await _context.SaveChangesAsync();
 
             return Ok();
         }
 
         [HttpPost]
         [Route("Users/Accounts")]
-        public ActionResult AttachAccount([FromBody] Account account, [FromBody] string userToken)
+        public async Task<IActionResult> AttachAccount([FromBody] Account account, [FromQuery] string userToken)
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest();
+                return BadRequest(ModelState);
             }
 
-            User user = _context.Users.FirstOrDefault(u => u.UserToken == userToken);
+            User user = await _context
+                .Users
+                .Include(u => u.Accounts)
+                .FirstOrDefaultAsync(u => u.UserToken == userToken);
+
             if (user == null)
             {
                 return NotFound("Invalid token");
             }
 
-            Connector connector = _context.Connectors.FirstOrDefault(c => c.NetworkName == account.NetworkName);
+            Connector connector = _context
+                .Connectors
+                .FirstOrDefault(c => c.NetworkName == account.NetworkName);
+
             if (connector == null)
             {
                 return NotFound("Not implemented network");
@@ -109,39 +141,45 @@ namespace MessagesTransferApi.Controllers
 
             user.Accounts.Add(networkAuthData);
 
-            _context.Accounts.Add(networkAuthData);
-
-            _context.SaveChanges();
+            await _context.SaveChangesAsync();
 
             return Ok();
         }
 
         [HttpPost]
         [Route("Messages")]
-        public ActionResult SendMessage([FromBody] Models.Message message, [FromBody] string userToken)
+        public async Task<IActionResult> SendMessage([FromBody] AggregatorMessage message, [FromQuery] string userToken)
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest();
+                return BadRequest(ModelState);
             }
 
-            User user = _context.Users.FirstOrDefault(u => u.UserToken == userToken);
+            User user = await _context
+                .Users
+                .Include(u => u.Accounts)
+                .FirstOrDefaultAsync(u => u.UserToken == userToken);
             if (user == null)
             {
                 return NotFound("Invalid token");
             }
 
-            string accessToken = user.Accounts.FirstOrDefault(a => a.PlatformName == message.NetworkName).AccessToken;
+            string accessToken = user
+                .Accounts
+                .FirstOrDefault(a => a.PlatformName == message.NetworkName)
+                .AccessToken;
             if (accessToken == null)
             {
                 return BadRequest("Access token for network not found");
             }
 
-            Connector connector = _context.Connectors.FirstOrDefault(c => c.NetworkName == message.NetworkName);
-            Data.Models.Message dataMessage = new Data.Models.Message()
+            Connector connector = await _context
+                .Connectors
+                .FirstOrDefaultAsync(c => c.NetworkName == message.NetworkName);
+            Message dataMessage = new Message()
             {
                 NetworkName = message.NetworkName,
-                ReceiverId = message.ReceiverId,
+                NetworkUserId = message.ReceiverId,
                 Text = message.Text
             };
 

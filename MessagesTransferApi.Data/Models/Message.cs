@@ -10,7 +10,7 @@ namespace MessagesTransferApi.Data.Models
 
         public string NetworkName { get; set; }
 
-        public string ReceiverId { get; set; }
+        public string NetworkUserId { get; set; }
 
         public string Text { get; set; }
     }

@@ -6,12 +6,12 @@ using System.Threading.Tasks;
 
 namespace MessagesTransferApi.Models
 {
-    public class Account
+    public class ConnectorData
     {
         [Required(ErrorMessage = "You need to input network name")]
         public string NetworkName { get; set; }
 
-        [Required(ErrorMessage = "You need to input acces token")]
-        public string AccessToken { get; set; }
+        [Required(ErrorMessage = "You need to input url")]
+        public string Url { get; set; }
     }
 }
